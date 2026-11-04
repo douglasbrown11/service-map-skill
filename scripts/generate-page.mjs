@@ -562,10 +562,14 @@ function DetailsPanel({
   service,
   details,
   onChange,
+  onSave,
+  saveError,
   onClose,
 }: {
   service: ServiceNode;
   details: DraftDetails;
+  onSave: () => void;
+  saveError: string;
   onChange: (details: DraftDetails) => void;
   onClose: () => void;
 }) {
@@ -642,8 +646,9 @@ function DetailsPanel({
         </div>
 
         <div className="details-actions">
+          {saveError && <p role="alert">{saveError}</p>}
           <button type="button" className="delete-button">Delete</button>
-          <button type="button" className="save-button">Save changes</button>
+          <button type="button" className="save-button" onClick={onSave}>Save changes</button>
         </div>
       </aside>
     </>
@@ -1060,6 +1065,32 @@ export default function InternalServiceMapPage() {
       passwordLocation: '',
     },
   ])));
+  const detailsKey = 'servicemap:details:' + (graph.project?.name ?? 'project');
+  const [savedDetails, setSavedDetails] = useState<Record<string, DraftDetails>>({});
+  const [saveError, setSaveError] = useState('');
+  useEffect(() => {
+    try {
+      const stored: unknown = JSON.parse(localStorage.getItem(detailsKey) ?? '{}');
+      if (!stored || typeof stored !== 'object' || Array.isArray(stored)) return;
+      const valid = Object.fromEntries(Object.entries(stored).filter(([, value]) =>
+        value && typeof value === 'object' && ['subtitle', 'use', 'account', 'passwordLocation'].every(key => typeof value[key] === 'string'),
+      )) as Record<string, DraftDetails>;
+      setSavedDetails(valid);
+      setDrafts(current => ({ ...current, ...valid }));
+    } catch { /* Ignore unavailable or invalid saved details until the user saves. */ }
+  }, [detailsKey]);
+  const saveDetails = () => {
+    if (!selectedId || !drafts[selectedId]) return;
+    const next = { ...savedDetails, [selectedId]: drafts[selectedId] };
+    try {
+      localStorage.setItem(detailsKey, JSON.stringify(next));
+      setSavedDetails(next);
+      setSaveError('');
+      setSelectedId(null);
+    } catch {
+      setSaveError('Could not save changes. Please try again.');
+    }
+  };
   const selected = nodes.find((service) => service.id === selectedId) ?? null;
   const descendantIds = useMemo(() => collectDescendantIds(nodes, selectedId), [nodes, selectedId]);
   const highlightedChildIds = useMemo(() => selectedId === 'project' ? descendantIds : new Set<string>(), [descendantIds, selectedId]);
@@ -1197,7 +1228,7 @@ ${desktop ? '' : `          <div className="intro">
                     <ServiceLogo service={service} />
                     <div className="service-copy">
                       <strong>{service.name}</strong>
-                      <span>{categoryLabel(service.category)}</span>
+                      <span>{savedDetails[service.id]?.subtitle ?? categoryLabel(service.category)}</span>
                     </div>
                     <i className={\`status-dot status-\${service.confidence}\`} />
                   </button>
@@ -1227,6 +1258,8 @@ ${desktop ? '' : `          <footer className="scan-foot">
           <DetailsPanel
             service={selected}
             details={drafts[selected.id]}
+            onSave={saveDetails}
+            saveError={saveError}
             onClose={() => setSelectedId(null)}
             onChange={(nextDetails) => setDrafts((current) => ({ ...current, [selected.id]: nextDetails }))}
           />
